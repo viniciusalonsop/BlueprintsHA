@@ -1,0 +1,267 @@
+blueprint:
+  name: "Alexa Devices - Ação Personalizada"
+  description: >
+    Executa ações da integração Alexa Devices:
+    notify.send_message, alexa_devices.send_sound,
+    alexa_devices.send_text_command ou alexa_devices.send_info_skill.
+    Opcionalmente ajusta o volume antes e depois da execução.
+  domain: script
+  homeassistant:
+    min_version: "2024.8.0"
+
+mode: queued
+max: 10
+icon: mdi:amazon-alexa
+
+fields:
+  acao_alexa:
+    name: "Ação da Alexa"
+    description: "Escolha qual ação deseja executar."
+    required: true
+    default: "notify.send_message"
+    selector:
+      select:
+        options:
+          - label: "Enviar mensagem / anúncio"
+            value: "notify.send_message"
+          - label: "Enviar som interno da Alexa"
+            value: "alexa_devices.send_sound"
+          - label: "Enviar comando de texto"
+            value: "alexa_devices.send_text_command"
+          - label: "Executar Info Skill"
+            value: "alexa_devices.send_info_skill"
+
+  entidade_notify:
+    name: "Entidade notify"
+    description: >
+      Usada somente com notify.send_message.
+      Escolha uma entidade notify da integração Alexa Devices,
+      como *_announce ou *_speak.
+    required: false
+    selector:
+      entity:
+        multiple: false
+        filter:
+          - domain: notify
+            integration: alexa_devices
+
+  dispositivo_alexa:
+    name: "Dispositivo Alexa"
+    description: >
+      Usado com send_sound, send_text_command e send_info_skill.
+      Também pode ser usado para controlar volume antes/depois.
+    required: false
+    selector:
+      device:
+        integration: alexa_devices
+
+  mensagem:
+    name: "Mensagem"
+    description: "Texto usado em notify.send_message."
+    required: false
+    selector:
+      text:
+        multiline: true
+
+  comando_texto:
+    name: "Comando de texto"
+    description: >
+      Usado em alexa_devices.send_text_command.
+      Exemplos: volume 7, whats the time, turn study lights off, play BBC Radio 6.
+    required: false
+    selector:
+      text:
+
+  som:
+    name: "Som Alexa"
+    description: >
+      Usado em alexa_devices.send_sound.
+      Exemplo: amzn_sfx_doorbell_chime_01.
+    required: false
+    default: "amzn_sfx_doorbell_chime_01"
+    selector:
+      text:
+
+  info_skill:
+    name: "Info Skill"
+    description: >
+      Usado em alexa_devices.send_info_skill.
+      Exemplos possíveis incluem recursos internos como data, previsão do tempo ou piada.
+    required: false
+    selector:
+      text:
+
+  ajustar_volume:
+    name: "Ajustar volume antes da ação?"
+    required: true
+    default: false
+    selector:
+      boolean:
+
+  volume_antes:
+    name: "Volume antes da ação"
+    required: true
+    default: 7
+    selector:
+      number:
+        min: 0
+        max: 10
+        step: 1
+        mode: slider
+
+  volume_depois:
+    name: "Volume após a ação"
+    required: true
+    default: 3
+    selector:
+      number:
+        min: 0
+        max: 10
+        step: 1
+        mode: slider
+
+  espera_apos_volume:
+    name: "Espera após ajustar volume"
+    required: true
+    default: 2
+    selector:
+      number:
+        min: 0
+        max: 10
+        step: 1
+        unit_of_measurement: "s"
+
+  espera_apos_acao:
+    name: "Espera antes de restaurar volume"
+    required: true
+    default: 8
+    selector:
+      number:
+        min: 1
+        max: 60
+        step: 1
+        unit_of_measurement: "s"
+
+sequence:
+  - variables:
+      acao: "{{ acao_alexa }}"
+      notify_entity: "{{ entidade_notify | default('', true) }}"
+      selected_device_id: "{{ dispositivo_alexa | default('', true) }}"
+      notify_device_id: "{{ device_id(entidade_notify) if entidade_notify is defined and entidade_notify else '' }}"
+      alexa_device_id: >
+        {% if selected_device_id %}
+          {{ selected_device_id }}
+        {% elif notify_device_id %}
+          {{ notify_device_id }}
+        {% else %}
+          {{ '' }}
+        {% endif %}
+
+  - alias: "Validar campos obrigatórios"
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'notify.send_message' and notify_entity == '' }}"
+        sequence:
+          - stop: "Para notify.send_message, selecione uma entidade notify da Alexa Devices."
+            error: true
+
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'notify.send_message' and (mensagem | default('', true) | trim) == '' }}"
+        sequence:
+          - stop: "Para notify.send_message, preencha o campo mensagem."
+            error: true
+
+      - conditions:
+          - condition: template
+            value_template: "{{ acao != 'notify.send_message' and alexa_device_id == '' }}"
+        sequence:
+          - stop: "Para esta ação, selecione um dispositivo Alexa."
+            error: true
+
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'alexa_devices.send_text_command' and (comando_texto | default('', true) | trim) == '' }}"
+        sequence:
+          - stop: "Para alexa_devices.send_text_command, preencha o campo comando de texto."
+            error: true
+
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'alexa_devices.send_sound' and (som | default('', true) | trim) == '' }}"
+        sequence:
+          - stop: "Para alexa_devices.send_sound, preencha o campo som."
+            error: true
+
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'alexa_devices.send_info_skill' and (info_skill | default('', true) | trim) == '' }}"
+        sequence:
+          - stop: "Para alexa_devices.send_info_skill, preencha o campo info_skill."
+            error: true
+
+  - alias: "Ajustar volume antes, se ativado"
+    if:
+      - condition: template
+        value_template: "{{ ajustar_volume | bool }}"
+    then:
+      - action: alexa_devices.send_text_command
+        data:
+          device_id: "{{ alexa_device_id }}"
+          text_command: "volume {{ volume_antes | int }}"
+
+      - delay:
+          seconds: "{{ espera_apos_volume | int }}"
+
+  - alias: "Executar ação escolhida"
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'notify.send_message' }}"
+        sequence:
+          - action: notify.send_message
+            target:
+              entity_id: "{{ notify_entity }}"
+            data:
+              message: "{{ mensagem }}"
+
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'alexa_devices.send_sound' }}"
+        sequence:
+          - action: alexa_devices.send_sound
+            data:
+              device_id: "{{ alexa_device_id }}"
+              sound: "{{ som }}"
+
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'alexa_devices.send_text_command' }}"
+        sequence:
+          - action: alexa_devices.send_text_command
+            data:
+              device_id: "{{ alexa_device_id }}"
+              text_command: "{{ comando_texto }}"
+
+      - conditions:
+          - condition: template
+            value_template: "{{ acao == 'alexa_devices.send_info_skill' }}"
+        sequence:
+          - action: alexa_devices.send_info_skill
+            data:
+              device_id: "{{ alexa_device_id }}"
+              info_skill: "{{ info_skill }}"
+
+  - alias: "Restaurar volume depois, se ativado"
+    if:
+      - condition: template
+        value_template: "{{ ajustar_volume | bool }}"
+    then:
+      - delay:
+          seconds: "{{ espera_apos_acao | int }}"
+
+      - action: alexa_devices.send_text_command
+        data:
+          device_id: "{{ alexa_device_id }}"
+          text_command: "volume {{ volume_depois | int }}"
